@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-```
+"""
 Script for identifying 'broad' firewall rules which allow 'many' systems to connect to 'many' other systems.
 The definition of 'many' is ambiguous, so sane defaults were attempted, but may need to be tweaked for
 your environment via `"--broad-ips-count` and `--broad-members-count`.
-```
+"""
 
 import argparse
 import csv
