@@ -392,7 +392,7 @@ def main():
     subparsers = parser.add_subparsers(dest='function', required=True)
 
     # Dump all rules and their group profile setting to a CSV
-    parser_dump = subparsers.add_parser('dump_rules', description="test")
+    parser_dump = subparsers.add_parser('dump_rules', description="Dump all rules to a CSV file for offline review")
     parser_dump.add_argument('--fpath', help="Destination to write CSV of rules to", default='all_rules.csv')
 
     parser_switch_default_usage = subparsers.add_parser('switch_default_usage', description="Update all rules using the 'default' profile to use a different Security Profile Group, so we can switch to a secure default")
