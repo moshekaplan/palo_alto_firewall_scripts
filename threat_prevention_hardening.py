@@ -444,8 +444,11 @@ def main():
             insecure_groups = fh.read().split('\n')
         threat_data_fpaths = parsed_args.threat_data_fpath
         traffic_data_fpaths = parsed_args.traffic_data_fpath
-        with open(parsed_args.dev_zones) as fh:
-            dev_zones = set(fh.read().split('\n'))
+        if parsed_args.dev_zones:
+            with open(parsed_args.dev_zones) as fh:
+                dev_zones = set(fh.read().split('\n'))
+        else:
+            dev_zones = set()
         output_fpath = parsed_args.fpath
         prepare_threat_data_analysis(panorama, api_key, insecure_groups, threat_data_fpaths, traffic_data_fpaths, dev_zones, output_fpath)
 
