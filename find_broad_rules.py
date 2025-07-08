@@ -490,7 +490,7 @@ def parse_ignore_list(fpath):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Disable a list of security rules")
+    parser = argparse.ArgumentParser(description="Script for identifying 'broad' firewall rules which allow 'many' systems to connect to 'many' other systems.")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--panorama", help="Panorama or Firewall to run on")
     group.add_argument("--xml", help="Process an XML file from 'Export Panorama configuration version'. This does not require an API key")
