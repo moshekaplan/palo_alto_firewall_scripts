@@ -255,6 +255,39 @@ def find_block_rules(pan_config, device_group=None, include_postrules=False):
     return block_rules
 
 
+def find_allow_rules(pan_config, device_group=None, include_postrules=False):
+    '''Find all allow rules which have a security profile group set'''
+    ruletypes = ['SecurityPreRules']
+    if include_postrules:
+        ruletypes.append('SecurityPostRules')
+
+    if device_group:
+        device_groups = [device_group]
+    else:
+        device_groups = pan_config.get_device_groups()
+
+    allow_rules = []
+    for i, device_group in enumerate(device_groups, start=1):
+        for ruletype in ruletypes:
+            for rule_num, rule_entry in enumerate(pan_config.get_devicegroup_policy(ruletype, device_group)):
+                # Skip disabled rules:
+                if rule_entry.find("./disabled") is not None and rule_entry.find("./disabled").text == "yes":
+                    continue
+                rule_dict = xml_object_to_dict(rule_entry)
+                # Only keep allow rules that have a security profile group
+                if rule_dict['entry']['action'] != 'allow':
+                    continue
+                if not rule_dict['entry'].get('profile-setting', {}).get('group', {}).get('member'):
+                    continue
+                allow_rule_entry = {
+                    'device_group': device_group,
+                    'rule_num': rule_num,
+                    'rule_dict': rule_dict['entry']
+                }
+                allow_rules.append(allow_rule_entry)
+    return allow_rules
+
+
 def listify_entries(entry):
     '''
     An entry can be either a list or a single entry
@@ -451,7 +484,46 @@ def find_problematic_block_rules(pan_config, device_group, rules, block_rules):
     return problematic_block_rules
 
 
-def write_broad_prerules(broad_prerules, problematic_block_rules, fname):
+def find_problematic_allow_rules(pan_config, device_group, rules, allow_rules):
+    """For each broad rule, find all other allow rules that overlap in source/destination
+    but have a *different* security profile group. Such overlapping allow rules could result
+    in a change of threat-prevention behavior if the broad rule is reordered.
+
+    Returns a mapping of rule names to potentially problematic allow rules (list).
+    """
+
+    # Build a data structure in advance of all of our object types
+    addresslike_objects = get_address_like_objects(pan_config, device_group)
+
+    problematic_allow_rules = {}
+    for rule in rules:
+        rule_name = rule['rule_dict']['@name']
+        rule_profile_group = rule['rule_dict'].get('profile-setting', {}).get('group', {}).get('member')
+
+        matching_allow_rules = []
+        for allow_rule in allow_rules:
+            # Skip self-comparison
+            if allow_rule['rule_dict']['@name'] == rule_name:
+                continue
+
+            # Only flag allow rules that have a *different* security profile group,
+            # since identical profile groups would not change threat-prevention behavior
+            allow_profile_group = allow_rule['rule_dict'].get('profile-setting', {}).get('group', {}).get('member')
+            if allow_profile_group == rule_profile_group:
+                continue
+
+            if rules_overlap(rule, allow_rule, addresslike_objects):
+                matching_allow_rules.append(allow_rule)
+
+        if matching_allow_rules:
+            if rule_name not in problematic_allow_rules:
+                problematic_allow_rules[rule_name] = []
+            problematic_allow_rules[rule_name] += matching_allow_rules
+
+    return problematic_allow_rules
+
+
+def write_broad_prerules(broad_prerules, problematic_block_rules, problematic_allow_rules, fname):
     '''Writes rule entries to a file'''
     output = []
     for broad_prerule in broad_prerules:
@@ -465,10 +537,11 @@ def write_broad_prerules(broad_prerules, problematic_block_rules, fname):
         row['destination'] = broad_prerule['rule_dict']['destination']['member']
         row['security_profile_group'] = broad_prerule['rule_dict']['profile-setting']['group']['member']
         row['problematic_block_rules'] = ",".join([block_rule['rule_dict']['@name'] for block_rule in problematic_block_rules.get(row['name'], [])])
+        row['problematic_allow_rules'] = ",".join([allow_rule['rule_dict']['@name'] for allow_rule in problematic_allow_rules.get(row['name'], [])])
         output += [row]
 
     with open(fname, 'w', newline='') as csvfile:
-        fieldnames = ['device_group', 'rule_num', 'name', 'from', 'source', 'to', 'destination', 'security_profile_group', 'problematic_block_rules']
+        fieldnames = ['device_group', 'rule_num', 'name', 'from', 'source', 'to', 'destination', 'security_profile_group', 'problematic_block_rules', 'problematic_allow_rules']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(output)
@@ -529,8 +602,10 @@ def main():
     # Find rules which are overly broad
     broad_prerules = find_broad_rules(pan_config, device_group, rules_to_ignore, include_postrules, broad_members_count, broad_ips_count)
     block_rules = find_block_rules(pan_config, device_group, include_postrules)
+    allow_rules = find_allow_rules(pan_config, device_group, include_postrules)
     problematic_block_rules = find_problematic_block_rules(pan_config, device_group, broad_prerules, block_rules)
-    write_broad_prerules(broad_prerules, problematic_block_rules, fname)
+    problematic_allow_rules = find_problematic_allow_rules(pan_config, device_group, broad_prerules, allow_rules)
+    write_broad_prerules(broad_prerules, problematic_block_rules, problematic_allow_rules, fname)
 
 
 if __name__ == '__main__':
