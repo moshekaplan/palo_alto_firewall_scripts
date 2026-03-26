@@ -222,8 +222,21 @@ def find_broad_rules(pan_config, device_group=None, rules_to_ignore=[], include_
     return broad_prerules
 
 
-def find_block_rules(pan_config, device_group=None, include_postrules=False):
-    '''Find block/drop rules which could cause a problem with moving rules down'''
+def filter_rules(pan_config, device_group=None, include_postrules=False, rule_type='block'):
+    '''Filter rules by action type.
+
+    Args:
+        pan_config: The PanConfig object representing the firewall configuration.
+        device_group: The device group to filter rules for. Defaults to all device groups.
+        include_postrules: Whether to include post-rules in addition to pre-rules.
+        rule_type: Which rules to return. Must be one of:
+            - 'allow'  : return only allow rules
+            - 'block'  : return only block/drop rules (default, preserves original behaviour)
+            - 'all'    : return all rules regardless of action
+    '''
+    if rule_type not in ('allow', 'block', 'all'):
+        raise ValueError(f"rule_type must be 'allow', 'block', or 'all'; got {rule_type!r}")
+
     ruletypes = ['SecurityPreRules']
     if include_postrules:
         ruletypes.append('SecurityPostRules')
@@ -234,25 +247,28 @@ def find_block_rules(pan_config, device_group=None, include_postrules=False):
     else:
         device_groups = pan_config.get_device_groups()
 
-    # Block rules
-    block_rules = []
+    matched_rules = []
     for i, device_group in enumerate(device_groups, start=1):
         for ruletype in ruletypes:
             for rule_num, rule_entry in enumerate(pan_config.get_devicegroup_policy(ruletype, device_group)):
                 # Skip disabled rules:
                 if rule_entry.find("./disabled") is not None and rule_entry.find("./disabled").text == "yes":
                     continue
-                # Skip allow rules, since we only care about block and drop rules
                 rule_dict = xml_object_to_dict(rule_entry)
-                if rule_dict['entry']['action'] == 'allow':
+                action = rule_dict['entry']['action']
+                # Apply rule_type filter
+                if rule_type == 'allow' and action != 'allow':
                     continue
-                block_rule_entry = {
+                if rule_type == 'block' and action == 'allow':
+                    continue
+                # rule_type == 'all' passes everything through
+                matched_rule_entry = {
                     'device_group': device_group,
                     'rule_num': rule_num,
                     'rule_dict': rule_dict['entry']
                 }
-                block_rules.append(block_rule_entry)
-    return block_rules
+                matched_rules.append(matched_rule_entry)
+    return matched_rules
 
 
 def listify_entries(entry):
@@ -528,7 +544,7 @@ def main():
 
     # Find rules which are overly broad
     broad_prerules = find_broad_rules(pan_config, device_group, rules_to_ignore, include_postrules, broad_members_count, broad_ips_count)
-    block_rules = find_block_rules(pan_config, device_group, include_postrules)
+    block_rules = filter_rules(pan_config, device_group, include_postrules, rule_type='block')
     problematic_block_rules = find_problematic_block_rules(pan_config, device_group, broad_prerules, block_rules)
     write_broad_prerules(broad_prerules, problematic_block_rules, fname)
 
